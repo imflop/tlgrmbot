@@ -91,8 +91,7 @@ if __name__ == '__main__':
     http_server.listen(options.port)
 
     CHAT_ID = options.chat
-    TOKEN = options.token
-    URL = "https://api.telegram.org/bot{token}/sendMessage".format(token=TOKEN)
+    URL = "https://api.telegram.org/bot{token}/sendMessage".format(token=options.token)
 
     app_log.info('Server is running at http://127.0.0.1:{port}'.format(port=options.port))
     app_log.info('Quit the server with Control-C')
