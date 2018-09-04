@@ -78,7 +78,6 @@ class FeedbackHandler(RequestHandler):
         return response
 
 
-
 if __name__ == '__main__':
     options.parse_command_line()
 
