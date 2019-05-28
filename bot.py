@@ -1,19 +1,19 @@
-import json
+import signal
 from datetime import datetime
+from urllib.parse import urlencode
 
-import requests
-from requests import Response
+from tornado.escape import json_decode
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest, HTTPResponse
 from tornado.httpserver import HTTPServer
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.log import app_log
 from tornado.options import define, options
-from tornado.web import Application, RequestHandler, gen
+from tornado.web import Application, RequestHandler
 
 define('port', default=8010, help='run on the given port', type=int)
 define('debug', default=True, help='debug mode', type=bool)
-define('notify_chat', default=None, help='notify chat id', type=str)
-define('feedback_chat', default=None, help='feedback chat id', type=str)
+define('notify-chat', default=None, help='notify chat id', type=str)
+define('feedback-chat', default=None, help='feedback chat id', type=str)
 define('token', default=None, help='bot token', type=str)
 
 
@@ -22,102 +22,98 @@ class StatusHandler(RequestHandler):
     Simple status class
     """
 
-    def get(self):
+    async def get(self):
         response = {
-            'version': '1.2.0',
-            'datetime_now': datetime.strftime(datetime.now(), '%Y.%m.%d %H:%M:%S')
+            'version': '1.3.0',
+            'datetime_now': datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
         }
         self.set_header('Content-Type', 'application/json')
         self.set_status(200)
         self.write(response)
-        self.finish()
+        await self.finish()
 
 
 class NotifyHandler(RequestHandler):
     """
-    Send notify to tlgtm chat
+    Send notify message type to tlgrm chat
     """
 
-    @gen.coroutine
-    def post(self):
-        data = json.loads(self.request.body.decode('utf-8'))
-        response = self.__requests_do_post(data)
+    async def post(self):
+        data = json_decode(self.request.body)
+        response = await self.do_post(data)
         self.set_header('Content-Type', 'application/json')
-        self.set_status(response.status_code)
-        self.write(dict(code=response.status_code, reason=response.reason))
-        self.finish()
+        self.set_status(response.code)
+        self.write(dict(code=response.code, reason=response.reason))
+        await self.finish()
 
-    def __requests_do_post(self, data: dict) -> requests.Response:
-        text = "{title}\n\n<strong>{username}</strong>\t{email}\t{site}".format(
-            username=data['user'], email=data['email'], title=data['title'], site=data['site']
-        )
+    async def do_post(self, data: dict) -> HTTPResponse:
+        text = f"{data['title']}\n\n<strong>{data['user']}</strong>\t{data['email']}\t{data['site']}"
         post_data = [('chat_id', NOTIFY_CHAT_ID), ('text', text), ('parse_mode', 'html')]
-        response = requests.post(URL, post_data)
-        if response.status_code == 200:
-            app_log.info('Data send to destination with reason: {reason}'.format(reason=response.reason))
-        else:
-            app_log.log('Data do NOT send to destination with reason: {reason}'.format(reason=response.reason))
+        http = AsyncHTTPClient()
+        request = HTTPRequest(url=URL, method="POST", body=urlencode(post_data))
+        response = await http.fetch(request)
+        result_json = json_decode(response.body)
+        app_log.info(
+            f"Sended {str(result_json['ok'])} to chat {result_json['result']['chat']['title']} at "
+            f"{datetime.utcfromtimestamp(int(result_json['result']['date'])).strftime('%Y-%m-%d %H:%M:%S')}"
+        )
         return response
 
 
 class FeedbackHandler(RequestHandler):
     """
-    Send feedback to tlgrm chat
+    Send feedback message type to tlgrm chat
     """
 
-    @gen.coroutine
-    def post(self):
-        data = json.loads(self.request.body.decode('utf-8'))
-        # response = await self.do_post(data)
-        # self.set_header('Content-Type', 'application/json')
-        # self.set_status(response.code)
-        # self.write(dict(code=response.code, reason=response.reason))
-        response = self.__requests_do_post(data)
+    async def post(self):
+        data = json_decode(self.request.body)
+        response = await self.do_post(data)
         self.set_header('Content-Type', 'application/json')
-        self.set_status(response.status_code)
-        self.write(dict(code=response.status_code, reason=response.reason))
-        self.finish()
-
-    def __requests_do_post(self, data: dict) -> Response:
-        text = "{text}\n\n<strong>{username}</strong>\t{email}\t{site}".format(
-            username=data['user'], email=data['email'], text=data['text'], site=data['site']
-        )
-        post_data = [('chat_id', FEEDBACK_CHAT_ID), ('text', text), ('parse_mode', 'html')]
-        response = requests.post(URL, post_data)
-        if response.status_code == 200:
-            app_log.info('Data send to destination with reason: {reason}'.format(reason=response.reason))
-        else:
-            app_log.log('Data do NOT send to destination with reason: {reason}'.format(reason=response.reason))
-        return response
+        self.set_status(response.code)
+        self.write(dict(code=response.code, reason=response.reason))
+        await self.finish()
 
     async def do_post(self, data: dict) -> HTTPResponse:
-        text = "{text}\n\n<strong>{username}</strong>\t{email}\t{site}".format(
-            username=data['user'], email=data['email'], text=data['text'], site=data['site']
-        )
-        post_data = {"chat_id": FEEDBACK_CHAT_ID, "text": text, "parse_mode": 'html'}
-        request = HTTPRequest(url=URL, method='POST', body=json.dumps(post_data))
+        text = f"{data['text']}\n\n<strong>{data['user']}</strong>\t{data['email']}\t{data['site']}"
+        post_data = [('chat_id', FEEDBACK_CHAT_ID), ('text', text), ('parse_mode', 'html')]
+        request = HTTPRequest(url=URL, method='POST', body=urlencode(post_data))
         http_client = AsyncHTTPClient()
         try:
             response = await http_client.fetch(request)
         except Exception as e:
-            print("Error: %s" % e)
+            app_log.error(f"Error: {e}")
         else:
-            x = json.loads(response.body.decode('utf-8'))
-            app_log.log(x)
+            result_json = json_decode(response.body)
             if response.code == 200:
-                app_log.info('Data send to destination with reason: {reason}'.format(reason=response.reason))
+                app_log.info(
+                    f"Data send to chat {result_json['result']['chat']['title']} with reason: {response.reason}"
+                )
             else:
-                app_log.log('Data do NOT send to destination with reason: {reason}'.format(reason=response.reason))
+                app_log.log(f"Data do NOT send to destination with reason: {response.reason}")
             return response
+
+
+class TlgrmBotApplication(Application):
+    is_closing = False
+
+    def singnal_handler(self, signum, frame):
+        app_log.info("exiting...")
+        self.is_closing = True
+
+    def try_exit(self):
+        if self.is_closing:
+            IOLoop.instance().stop()
+            app_log.info("exit success")
 
 
 if __name__ == '__main__':
     options.parse_command_line()
 
-    # api = requests.Session()
-    # api.post()
+    NOTIFY_CHAT_ID = options.notify_chat
+    FEEDBACK_CHAT_ID = options.feedback_chat
+    URL = f"https://api.telegram.org/bot{options.token}/sendMessage"
 
-    application = Application([
+    application = TlgrmBotApplication([
         (r'/api/notify', NotifyHandler),
         (r'/api/feedback', FeedbackHandler),
         (r'/api/status', StatusHandler)
@@ -126,11 +122,9 @@ if __name__ == '__main__':
     http_server = HTTPServer(application)
     http_server.listen(options.port)
 
-    NOTIFY_CHAT_ID = options.notify_chat
-    FEEDBACK_CHAT_ID = options.feedback_chat
-    URL = "https://api.telegram.org/bot{token}/sendMessage".format(token=options.token)
+    app_log.info(f"Server is running at http://127.0.0.1:{options.port}")
+    app_log.info(f"Quit the server with Control-C")
 
-    app_log.info('Server is running at http://127.0.0.1:{port}'.format(port=options.port))
-    app_log.info('Quit the server with Control-C')
-
+    signal.signal(signal.SIGINT, application.singnal_handler)
+    PeriodicCallback(application.try_exit, 100).start()
     IOLoop.instance().start()
