@@ -24,7 +24,7 @@ class StatusHandler(RequestHandler):
 
     async def get(self):
         response = {
-            'version': '1.3.0',
+            'version': '1.3.1',
             'datetime_now': datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
         }
         self.set_header('Content-Type', 'application/json')
