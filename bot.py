@@ -9,7 +9,7 @@ from tornado.httpserver import HTTPServer
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.log import app_log
 from tornado.options import define, options
-from tornado.web import Application, RequestHandler
+from tornado.web import Application, RequestHandler, HTTPError
 
 define("port", default=8010, help="run on the given port", type=int)
 define("debug", default=True, help="debug mode", type=bool)
@@ -42,16 +42,19 @@ class ResponseHandler(RequestHandler):
     """
     Send feedback message type to tlgrm chat
     """
+    async def prepare(self) -> Optional[Awaitable[None]]:
+        header = "Content-Type"
+        body = "application/json"
+        self.set_header(header, body)
 
     async def post(self):
         data = json_decode(self.request.body)
         response = await self.do_post(data)
-        self.set_header("Content-Type", "application/json")
         self.set_status(response.code)
         self.write(dict(code=response.code, reason=response.reason))
         await self.finish()
 
-    async def do_post(self, data: dict) -> HTTPResponse:
+    async def do_post(self, data: dict) -> Union[HTTPError, HTTPResponse]:
         text = self._parse_data(data)
         post_data = [
             ("chat_id", CHAT_ID),
@@ -63,7 +66,8 @@ class ResponseHandler(RequestHandler):
         try:
             response = await http_client.fetch(request)
         except Exception as e:
-            app_log.error(f"Error: {e}")
+            app_log.info(f"Error: {e}")
+            return HTTPError(500, e.message)
         else:
             result_json = json_decode(response.body)
             if response.code == 200:
@@ -74,7 +78,7 @@ class ResponseHandler(RequestHandler):
                 app_log.log(
                     f"Data do NOT send to destination with reason: {response.reason}"
                 )
-            return response
+        return response
 
     def _parse_data(self, data: dict) -> str:
         result = ""
@@ -151,7 +155,7 @@ if __name__ == "__main__":
     URL = f"https://api.telegram.org/bot{options.token}/sendMessage"
 
     application = TlgrmBotApplication(
-        [(r"/api/feedback", ResponseHandler), (r"/api/status", StatusHandler),],
+        [(r"/api/feedback", ResponseHandler), (r"/api/status", StatusHandler)],
         debug=options.debug,
     )
 
