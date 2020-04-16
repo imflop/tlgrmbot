@@ -52,7 +52,7 @@ class ResponseHandler(RequestHandler):
         response = await self.do_post(data)
         # self.set_status(response.code)
         # self.write(dict(code=response.code, reason=response.reason))
-        self.write(response)
+        self.write(dict(response=response))
         await self.finish()
 
     async def do_post(self, data: dict) -> Union[HTTPError, HTTPResponse]:
